@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 
@@ -19,10 +18,7 @@ class CameraService {
       orElse: () => _cameras!.first,
     );
 
-    // ML Kit requires NV21 on Android, bgra8888 on iOS
-    final imageFormat = Platform.isAndroid
-        ? ImageFormatGroup.nv21
-        : ImageFormatGroup.bgra8888;
+    final imageFormat = ImageFormatGroup.nv21;
 
     _controller = CameraController(
       frontCamera,
