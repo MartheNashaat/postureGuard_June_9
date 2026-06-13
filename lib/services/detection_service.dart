@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:ui' show Size;
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
@@ -159,7 +160,11 @@ class DetectionService {
     final sensorOrientation = camera.sensorOrientation;
     InputImageRotation? rotation;
 
-    rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
+    if (Platform.isIOS) {
+      rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
+    } else if (Platform.isAndroid) {
+      rotation = InputImageRotationValue.fromRawValue(sensorOrientation);
+    }
 
     if (rotation == null) return null;
 

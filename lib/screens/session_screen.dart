@@ -196,7 +196,7 @@ void _startDetection() {
       _currentScore = result.overallScore;
       
       // Send posture update to overlay service
-      await OverlayService.updatePosture(_currentScore.round(), _currentStatus.name);
+      await OverlayService.updatePosture(_combinedScore.round(), _combinedStatus.name);
       
       if (!mounted) return;
       
@@ -362,14 +362,16 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
       samplingPeriod: const Duration(milliseconds: 250),
     ).listen((event) {
       if (!mounted || _isEnding) return;
-      // EMA smoothing (α=0.4) to reduce sensor noise
+      // EMA smoothing (α=0.6): faster than 0.4 so phone-position violations
+      // fire in ~300 ms instead of ~1.2 s. Still smooth enough to suppress
+      // single-sample noise spikes (50% hysteresis in the analyzer handles the rest).
       if (!_accelInitialized) {
         _smoothAccelX = event.x;
         _smoothAccelY = event.y;
         _smoothAccelZ = event.z;
         _accelInitialized = true;
       } else {
-        const alpha = 0.4;
+        const alpha = 0.6;
         _smoothAccelX = alpha * event.x + (1 - alpha) * _smoothAccelX;
         _smoothAccelY = alpha * event.y + (1 - alpha) * _smoothAccelY;
         _smoothAccelZ = alpha * event.z + (1 - alpha) * _smoothAccelZ;
@@ -400,7 +402,7 @@ void didChangeAppLifecycleState(AppLifecycleState state) {
       });
     } else if (_isAngleOverlayShowing) {
       // Overlay visible — update score live every tick
-      OverlayService.updatePosture(_currentAngleScore.round(), angleBad ? "bad" : "good");
+      OverlayService.updatePosture(_combinedScore.round(), _combinedStatus.name);
       // Hide once angle is back within ~3° of baseline (85% with EMA smoothing)
       if (_currentAngleScore >= 85) {
         _isAngleBad = false;
@@ -684,24 +686,6 @@ Widget _buildPulsingGhostGuide() {
     // --- Updated UI Components with Progressive Scoring ---
 
   Widget _buildHUD() {
-    final bool phonePositionBad = _currentResult.headDrop || _currentResult.headRaise;
-
-    // Soft head position indicators — only show when the hard violation hasn't
-    // fired yet (once the hard badge says "Phone too high/low", the soft label
-    // is redundant and clutters the display).
-    const softThreshold = 0.04;
-    final bool noseAboveBaseline = !phonePositionBad &&
-        _currentLandmarks != null &&
-        _calibration != null &&
-        (_calibration!.noseY - _currentLandmarks!.noseY) > softThreshold;
-    final bool noseBelowBaseline = !phonePositionBad &&
-        _currentLandmarks != null &&
-        _calibration != null &&
-        (_currentLandmarks!.noseY - _calibration!.noseY) > softThreshold;
-    // Pose not detected at all usually means phone is so far above head the face
-    // left the frame — treat as "Phone too high" hint.
-    final bool poseLostPhoneTooHigh = _poseLost && _calibration != null;
-
     return Positioned(
       top: 16,
       left: 16,
@@ -711,13 +695,7 @@ Widget _buildPulsingGhostGuide() {
           _buildTimerBadge(),
           const SizedBox(height: 8),
           _buildStreakBadge(),
-          if (noseAboveBaseline)
-            _buildHeadDirectionBadge(up: true),
-          if (noseBelowBaseline)
-            _buildHeadDirectionBadge(up: false),
-          if (poseLostPhoneTooHigh)
-            _buildPhoneTooHighHint(),
-          if (_currentResult.violationCount > 0 && _combinedScore < 80)
+          if (_currentResult.violationCount > 0)
             _buildViolationBadge(),
         ],
       ),
@@ -1006,7 +984,8 @@ Widget _buildControls() {
   }
 
   Widget _buildRuleIndicators() {
-    final bool phonePositionBad = _currentResult.headDrop || _currentResult.headRaise;
+    final bool phonePositionBad = _currentResult.phoneTooHigh || _currentResult.phoneTooLow ||
+        _currentResult.headDrop || _currentResult.headRise;
     return Wrap(
       spacing: 8,
       runSpacing: 6,

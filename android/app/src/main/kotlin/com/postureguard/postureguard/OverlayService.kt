@@ -99,26 +99,25 @@ class OverlayService : Service() {
                 val rightShoulderX = baselineRightShoulderX * width
                 val rightShoulderY = baselineRightShoulderY * height
                 
-                // Annoying bright colors based on how bad posture is
-                val mainColor = when {
-                    currentScore >= 80 -> Color.parseColor("#40E0E0E0")  // Teal (mild)
-                    currentScore >= 50 -> Color.parseColor("#FFFF4500")  // Bright Orange-Red
-                    else -> Color.parseColor("#FFFF0000")  // Pure Red - VERY ANNOYING
+                // Colors driven by hysteresis band — never flicker at exact threshold
+                val mainColor = when (colorBand) {
+                    2    -> Color.parseColor("#40E0E0E0")  // grey (good)
+                    1    -> Color.parseColor("#FFFF4500")  // orange (warning)
+                    else -> Color.parseColor("#FFFF0000")  // red (bad)
                 }
-                
-                val glowColor = when {
-                    currentScore >= 80 -> Color.parseColor("#20E0E0E0")
-                    currentScore >= 50 -> Color.parseColor("#80FF4500")
-                    else -> Color.parseColor("#C0FF0000")  // Strong red glow
+
+                val glowColor = when (colorBand) {
+                    2    -> Color.parseColor("#20E0E0E0")
+                    1    -> Color.parseColor("#80FF4500")
+                    else -> Color.parseColor("#C0FF0000")
                 }
-                
-                // EXTREMELY THICK LINES
+
                 paint.color = mainColor
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = when {
-                    currentScore < 50 -> 32f
-                    currentScore < 80 -> 24f
-                    else -> 16f
+                paint.strokeWidth = when (colorBand) {
+                    2    -> 16f
+                    1    -> 24f
+                    else -> 32f
                 }
                 paint.strokeCap = Paint.Cap.ROUND
                 paint.strokeJoin = Paint.Join.ROUND
@@ -149,10 +148,10 @@ class OverlayService : Service() {
                 canvas.drawLine(noseX, noseY, midX, midY, paint)
                 
                 // Draw JOINTS
-                val jointSize = when {
-                    currentScore < 50 -> 80f
-                    currentScore < 80 -> 50f
-                    else -> 30f
+                val jointSize = when (colorBand) {
+                    2    -> 30f
+                    1    -> 50f
+                    else -> 80f
                 }
                 
                 canvas.drawCircle(noseX, noseY, jointSize, fillPaint)
@@ -161,46 +160,6 @@ class OverlayService : Service() {
                 canvas.drawCircle(leftShoulderX, leftShoulderY, jointSize, fillPaint)
                 canvas.drawCircle(rightShoulderX, rightShoulderY, jointSize, fillPaint)
                 
-                // Draw TEXT
-                val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    isFakeBoldText = true
-                    textAlign = Paint.Align.CENTER
-                }
-                
-                if (currentScore < 80) {
-                    textPaint.textSize = when {
-                        currentScore < 50 -> 120f
-                        currentScore < 80 -> 80f
-                        else -> 48f
-                    }
-                    textPaint.color = when {
-                        currentScore >= 80 -> Color.parseColor("#E0E0E0")
-                        currentScore >= 50 -> Color.parseColor("#FF4500")
-                        else -> Color.parseColor("#FF0000")
-                    }
-                    
-                    val scoreText = "${currentScore}%"
-                    canvas.drawText(scoreText, width / 2, height * 0.15f, textPaint)
-                    
-                    if (currentScore < 70) {
-                        textPaint.textSize = when {
-                            currentScore < 40 -> 64f
-                            else -> 48f
-                        }
-                        textPaint.color = Color.WHITE
-                        
-                        val warningText = when {
-                            currentScore < 30 -> "⚠️ CRITICAL! FIX NOW! ⚠️"
-                            currentScore < 50 -> "⚠️ BAD POSTURE! ADJUST! ⚠️"
-                            else -> "⚠️ CORRECT YOUR POSTURE ⚠️"
-                        }
-                        canvas.drawText(warningText, width / 2, height * 0.25f, textPaint)
-                        
-                        textPaint.textSize = 32f
-                        textPaint.color = Color.parseColor("#FFCC00")
-                        canvas.drawText("MATCH THE GHOST OUTLINE!", width / 2, height * 0.35f, textPaint)
-                    }
-                }
             }
         }
         
@@ -220,9 +179,23 @@ class OverlayService : Service() {
         windowManager.addView(overlayView, params)
     }
     
+    private var smoothedScore = 100f
+    // 2=good(grey), 1=warning(orange), 0=bad(red)
+    // Entry/exit thresholds create a 10-point dead-band so score jitter near
+    // the 50 boundary can never flip the color back and forth each frame.
+    private var colorBand = 2
+
     fun updateOverlay(score: Int, status: String) {
-        currentScore = score
+        smoothedScore = 0.25f * score + 0.75f * smoothedScore
+        currentScore = smoothedScore.toInt()
         currentStatus = status
+        colorBand = when {
+            smoothedScore >= 80f -> 2
+            smoothedScore <= 45f -> 0
+            colorBand == 2 && smoothedScore < 75f -> 1  // leaving good
+            colorBand == 0 && smoothedScore > 55f -> 1  // leaving bad
+            else -> colorBand  // stay put (hysteresis)
+        }
         if (::overlayView.isInitialized) {
             overlayView.invalidate()
         }

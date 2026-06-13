@@ -38,9 +38,14 @@ Future<void> initializeService() async {
     iosConfiguration: IosConfiguration(
       autoStart: false,
       onForeground: onStart,
-      onBackground: (_) => true,
+      onBackground: onIosBackground,
     ),
   );
+}
+
+@pragma('vm:entry-point')
+bool onIosBackground(ServiceInstance service) {
+  return true;
 }
 
 @pragma('vm:entry-point')
